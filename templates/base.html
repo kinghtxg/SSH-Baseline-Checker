@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}SSH 巡检工具{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        t: { bg: '#0a0a0a', card: '#141414', border: '#1e1e1e', hover: '#1a1a1a' },
+                        tool: { bg: '#0d0d0d', border: '#252525', hover: '#1e1e1e' },
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background: #0a0a0a; color: #d0d0d0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .tc { background: #141414; border: 1px solid #1e1e1e; border-radius: 8px; }
+        .ti { background: #0f0f0f; border: 1px solid #1e1e1e; color: #e0e0e0; }
+        .ti:focus { border-color: #3b82f6; outline: none; box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+        .btn-p { background: #2563eb; color: white; }
+        .btn-p:hover { background: #1d4ed8; }
+        .btn-s { background: #1e1e1e; color: #a0a0a0; border: 1px solid #2a2a2a; }
+        .btn-s:hover { background: #252525; color: #e0e0e0; }
+        .btn-d { background: #dc2626; color: white; }
+        .sl { display: flex; align-items: center; gap: 10px; padding: 10px 14px; color: #808080; border-radius: 6px; text-decoration: none; font-size: 13px; transition: all 0.15s; }
+        .sl:hover, .sl.active { background: #1a1a1a; color: #3b82f6; }
+        .sl.active { font-weight: 500; }
+        .ok { color: #4ade80; } .fail { color: #f87171; } .warn { color: #fbbf24; } .blue { color: #60a5fa; }
+        .fade { animation: fi 0.3s ease; }
+        @keyframes fi { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .terminal { font-family: 'Courier New', 'DejaVu Sans Mono', 'Noto Sans Mono', monospace; font-size: 12px; line-height: 1.5; }
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+        .tool-panel { background: #0d0d0d; border-right: 1px solid #1e1e1e; }
+        .ssh-output { white-space: pre-wrap; word-break: break-all; }
+        #toast { position: fixed; top: 16px; right: 16px; z-index: 9999; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="h-screen overflow-hidden flex">
+    <!-- 侧边栏导航 -->
+    <aside class="w-14 bg-[#0d0d0d] border-r border-[#1e1e1e] flex flex-col items-center py-3 flex-shrink-0 z-20">
+        <!-- Logo -->
+        <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center mb-4">
+            <i class="fas fa-terminal text-white text-xs"></i>
+        </div>
+
+        <!-- 主导航 -->
+        <nav class="flex-1 space-y-1 w-full">
+            <a href="/inspect/single" class="flex flex-col items-center py-2.5 text-[11px] gap-1 rounded-lg mx-1.5 {% if request.path == '/inspect/single' %}text-blue-400 bg-[#1a1a1a]{% else %}text-gray-500 hover:text-gray-300 hover:bg-[#151515]{% endif %}" title="单账号检查">
+                <i class="fas fa-user-check text-sm"></i><span class="scale-90">单机</span>
+            </a>
+            <a href="/" class="flex flex-col items-center py-2.5 text-[11px] gap-1 rounded-lg mx-1.5 {% if request.path == '/' %}text-blue-400 bg-[#1a1a1a]{% else %}text-gray-500 hover:text-gray-300 hover:bg-[#151515]{% endif %}" title="巡检执行">
+                <i class="fas fa-bolt text-sm"></i><span class="scale-90">巡检</span>
+            </a>
+            <a href="/items" class="flex flex-col items-center py-2.5 text-[11px] gap-1 rounded-lg mx-1.5 {% if request.path == '/items' %}text-blue-400 bg-[#1a1a1a]{% else %}text-gray-500 hover:text-gray-300 hover:bg-[#151515]{% endif %}" title="检查项管理">
+                <i class="fas fa-list-check text-sm"></i><span class="scale-90">检查项</span>
+            </a>
+            <a href="/accounts" class="flex flex-col items-center py-2.5 text-[11px] gap-1 rounded-lg mx-1.5 {% if request.path == '/accounts' %}text-blue-400 bg-[#1a1a1a]{% else %}text-gray-500 hover:text-gray-300 hover:bg-[#151515]{% endif %}" title="账号管理">
+                <i class="fas fa-server text-sm"></i><span class="scale-90">账号</span>
+            </a>
+            <a href="/reports" class="flex flex-col items-center py-2.5 text-[11px] gap-1 rounded-lg mx-1.5 {% if request.path.startswith('/reports') %}text-blue-400 bg-[#1a1a1a]{% else %}text-gray-500 hover:text-gray-300 hover:bg-[#151515]{% endif %}" title="巡检报告">
+                <i class="fas fa-file-lines text-sm"></i><span class="scale-90">报告</span>
+            </a>
+        </nav>
+
+        <!-- 工具栏入口 -->
+        <div class="w-full space-y-1 pb-2">
+            <button onclick="toggleToolPanel()" class="flex flex-col items-center py-2.5 text-[11px] gap-1 rounded-lg mx-1.5 text-gray-500 hover:text-blue-400 hover:bg-[#151515] w-[calc(100%-12px)]" title="工具面板">
+                <i class="fas fa-toolbox text-sm"></i><span class="scale-90">工具</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- 工具面板（可折叠） -->
+    <div id="tool-panel" class="hidden w-80 tool-panel flex flex-col flex-shrink-0 border-r border-[#1e1e1e]">
+        <!-- 工具面板头部 -->
+        <div class="flex items-center justify-between px-3 py-2.5 border-b border-[#1e1e1e]">
+            <span class="text-xs font-medium text-gray-300">工具面板</span>
+            <button onclick="toggleToolPanel()" class="text-gray-500 hover:text-white"><i class="fas fa-xmark text-xs"></i></button>
+        </div>
+
+        <!-- 工具标签 -->
+        <div class="flex border-b border-[#1e1e1e]">
+            <button onclick="switchToolTab('ssh')" id="tab-ssh" class="flex-1 py-2 text-xs text-blue-400 border-b-2 border-blue-500">SSH</button>
+            <button onclick="switchToolTab('ping')" id="tab-ping" class="flex-1 py-2 text-xs text-gray-500 hover:text-gray-300">Ping</button>
+            <button onclick="switchToolTab('telnet')" id="tab-telnet" class="flex-1 py-2 text-xs text-gray-500 hover:text-gray-300">Telnet</button>
+            <button onclick="switchToolTab('curl')" id="tab-curl" class="flex-1 py-2 text-xs text-gray-500 hover:text-gray-300">Curl</button>
+        </div>
+
+        <!-- SSH终端 -->
+        <div id="tool-ssh" class="flex-1 flex flex-col overflow-hidden">
+            <div class="p-2 space-y-1.5 border-b border-[#1e1e1e]">
+                <select id="tool-ssh-host" class="ti w-full px-2 py-1 rounded text-xs" onchange="fillSshCredentials()">
+                    <option value="">选择主机...</option>
+                </select>
+                <div class="flex gap-1">
+                    <input type="text" id="tool-ssh-ip" class="ti flex-1 px-2 py-1 rounded text-xs" placeholder="IP">
+                    <input type="number" id="tool-ssh-port" class="ti w-14 px-2 py-1 rounded text-xs" placeholder="22" value="22">
+                </div>
+                <div class="flex gap-1">
+                    <input type="text" id="tool-ssh-user" class="ti flex-1 px-2 py-1 rounded text-xs" placeholder="用户名">
+                    <input type="password" id="tool-ssh-pass" class="ti flex-1 px-2 py-1 rounded text-xs" placeholder="密码">
+                </div>
+                <div class="flex gap-1">
+                    <button onclick="connectSshTerminal()" id="btn-ssh-connect" class="btn-p flex-1 py-1 rounded text-xs">连接</button>
+                    <button onclick="disconnectSshTerminal()" class="btn-s flex-1 py-1 rounded text-xs hidden" id="btn-ssh-disconnect">断开</button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2 bg-black" id="ssh-terminal-output" style="font-family:monospace;font-size:11px;line-height:1.4;white-space:pre-wrap;word-break:break-all;"></div>
+            <div class="p-2 border-t border-[#1e1e1e] flex gap-1">
+                <input type="text" id="ssh-command-input" class="ti flex-1 px-2 py-1 rounded text-xs font-mono" placeholder="输入命令..." onkeydown="if(event.key==='Enter') sendSshCommand()">
+                <button onclick="sendSshCommand()" class="btn-p px-2 py-1 rounded text-xs"><i class="fas fa-play"></i></button>
+            </div>
+        </div>
+
+        <!-- Ping工具 -->
+        <div id="tool-ping" class="hidden flex-1 flex flex-col overflow-hidden p-2 space-y-2">
+            <div class="flex gap-1">
+                <input type="text" id="ping-target" class="ti flex-1 px-2 py-1.5 rounded text-xs" placeholder="目标IP或域名">
+                <button onclick="runPing()" class="btn-p px-3 py-1.5 rounded text-xs"><i class="fas fa-play"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto bg-black rounded p-2 terminal" id="ping-output"></div>
+        </div>
+
+        <!-- Telnet工具 -->
+        <div id="tool-telnet" class="hidden flex-1 flex flex-col overflow-hidden p-2 space-y-2">
+            <div class="flex gap-1">
+                <input type="text" id="telnet-host" class="ti flex-1 px-2 py-1.5 rounded text-xs" placeholder="主机">
+                <input type="number" id="telnet-port" class="ti w-16 px-2 py-1.5 rounded text-xs" placeholder="23" value="23">
+                <button onclick="runTelnet()" class="btn-p px-3 py-1.5 rounded text-xs"><i class="fas fa-play"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto bg-black rounded p-2 terminal" id="telnet-output"></div>
+        </div>
+
+        <!-- Curl工具 -->
+        <div id="tool-curl" class="hidden flex-1 flex flex-col overflow-hidden p-2 space-y-2">
+            <div class="flex gap-1">
+                <input type="text" id="curl-url" class="ti flex-1 px-2 py-1.5 rounded text-xs" placeholder="http://example.com">
+                <button onclick="runCurl()" class="btn-p px-3 py-1.5 rounded text-xs"><i class="fas fa-play"></i></button>
+            </div>
+            <div class="flex-1 overflow-y-auto bg-black rounded p-2 terminal" id="curl-output"></div>
+        </div>
+    </div>
+
+    <!-- 主内容 -->
+    <main class="flex-1 overflow-y-auto bg-[#0a0a0a]">{% block content %}{% endblock %}</main>
+
+    <div id="toast"></div>
+
+    <script>
+    // Toast
+    function toast(msg, type='success') {
+        const c = { success: 'bg-green-600', error: 'bg-red-600', warn: 'bg-yellow-600' };
+        const i = { success: 'fa-check', error: 'fa-xmark', warn: 'fa-exclamation' };
+        const el = document.createElement('div');
+        el.className = `${c[type]} text-white px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 fade text-sm min-w-[200px] mb-2`;
+        el.innerHTML = `<i class="fas ${i[type]}"></i> ${msg}`;
+        document.getElementById('toast').appendChild(el);
+        setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 3000);
+    }
+
+    // API
+    async function api(url, method='GET', body=null) {
+        const opts = { method, headers: { 'Content-Type': 'application/json' } };
+        if (body) opts.body = JSON.stringify(body);
+        const r = await fetch(url, opts);
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || '请求失败');
+        return d;
+    }
+
+    function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+    function escHtml(t) { if(!t) return ''; const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+
+    // 工具面板切换
+    function toggleToolPanel() {
+        const p = document.getElementById('tool-panel');
+        p.classList.toggle('hidden');
+        if (!p.classList.contains('hidden')) loadAccountGroups();
+    }
+
+    function switchToolTab(tab) {
+        ['ssh', 'ping', 'telnet', 'curl'].forEach(t => {
+            document.getElementById(`tool-${t}`).classList.add('hidden');
+            document.getElementById(`tab-${t}`).className = 'flex-1 py-2 text-xs text-gray-500 hover:text-gray-300';
+        });
+        document.getElementById(`tool-${tab}`).classList.remove('hidden');
+        document.getElementById(`tab-${tab}`).className = 'flex-1 py-2 text-xs text-blue-400 border-b-2 border-blue-500';
+    }
+
+    // 加载账号组到SSH选择框
+    async function loadAccountGroups() {
+        try {
+            const d = await api('/api/account-groups');
+            const sel = document.getElementById('tool-ssh-host');
+            sel.innerHTML = '<option value="">选择主机...</option>';
+            d.data.forEach(g => {
+                const og = document.createElement('optgroup');
+                og.label = g.name;
+                g.hosts.forEach(h => {
+                    const opt = document.createElement('option');
+                    opt.value = JSON.stringify({ host: h.host, port: h.port, username: h.username, password: h.password });
+                    opt.textContent = `${h.name || h.host} (${h.username})`;
+                    og.appendChild(opt);
+                });
+                if (g.hosts.length > 0) sel.appendChild(og);
+            });
+        } catch (e) { console.log('加载账号组失败', e); }
+    }
+
+    function fillSshCredentials() {
+        const val = document.getElementById('tool-ssh-host').value;
+        if (!val) return;
+        try {
+            const d = JSON.parse(val);
+            document.getElementById('tool-ssh-ip').value = d.host;
+            document.getElementById('tool-ssh-port').value = d.port;
+            document.getElementById('tool-ssh-user').value = d.username;
+            document.getElementById('tool-ssh-pass').value = d.password;
+        } catch (e) {}
+    }
+
+    // SSH Socket.IO终端
+    let socket = null;
+    let sshConnected = false;
+
+    function appendTerminal(text) {
+        const el = document.getElementById('ssh-terminal-output');
+        const span = document.createElement('span');
+        span.textContent = text;
+        el.appendChild(span);
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function connectSshTerminal() {
+        const host = document.getElementById('tool-ssh-ip').value.trim();
+        const port = parseInt(document.getElementById('tool-ssh-port').value) || 22;
+        const username = document.getElementById('tool-ssh-user').value.trim();
+        const password = document.getElementById('tool-ssh-pass').value;
+
+        if (!host || !username || !password) { toast('请填写完整信息', 'error'); return; }
+
+        if (!socket) socket = io();
+
+        socket.off('ssh_data').off('ssh_error');
+
+        socket.on('ssh_data', (data) => {
+            appendTerminal(data.output);
+            sshConnected = true;
+            document.getElementById('btn-ssh-connect').classList.add('hidden');
+            document.getElementById('btn-ssh-disconnect').classList.remove('hidden');
+        });
+
+        socket.on('ssh_error', (data) => {
+            appendTerminal('\r\n[错误] ' + data.message + '\r\n');
+            sshConnected = false;
+            document.getElementById('btn-ssh-connect').classList.remove('hidden');
+            document.getElementById('btn-ssh-disconnect').classList.add('hidden');
+        });
+
+        document.getElementById('ssh-terminal-output').innerHTML = '';
+        appendTerminal(`正在连接 ${username}@${host}:${port}...\r\n`);
+        socket.emit('ssh_connect', { host, port, username, password });
+    }
+
+    function disconnectSshTerminal() {
+        if (socket) { socket.disconnect(); socket = null; }
+        sshConnected = false;
+        appendTerminal('\r\n[已断开]\r\n');
+        document.getElementById('btn-ssh-connect').classList.remove('hidden');
+        document.getElementById('btn-ssh-disconnect').classList.add('hidden');
+    }
+
+    function sendSshCommand() {
+        if (!sshConnected || !socket) { toast('请先连接SSH', 'error'); return; }
+        const input = document.getElementById('ssh-command-input');
+        const cmd = input.value;
+        if (!cmd.trim()) return;
+        appendTerminal(cmd + '\r\n');
+        socket.emit('ssh_send', { command: cmd });
+        input.value = '';
+    }
+
+    // Ping工具
+    async function runPing() {
+        const target = document.getElementById('ping-target').value.trim();
+        if (!target) { toast('请输入目标', 'error'); return; }
+        const el = document.getElementById('ping-output');
+        el.textContent = `> ping -c 4 ${target}\n执行中...\n`;
+        try {
+            const d = await api('/api/tools/ping', 'POST', { target });
+            el.textContent = `> ${d.command}\n${d.output}`;
+        } catch (e) { el.textContent = `> ping ${target}\n错误: ${e.message}`; }
+    }
+
+    // Telnet工具
+    async function runTelnet() {
+        const host = document.getElementById('telnet-host').value.trim();
+        const port = parseInt(document.getElementById('telnet-port').value) || 23;
+        if (!host) { toast('请输入主机', 'error'); return; }
+        const el = document.getElementById('telnet-output');
+        el.textContent = `> telnet ${host} ${port}\n检测中...\n`;
+        try {
+            const d = await api('/api/tools/telnet', 'POST', { host, port });
+            el.textContent = `> ${d.command}\n${d.output}`;
+        } catch (e) { el.textContent = `> telnet ${host} ${port}\n错误: ${e.message}`; }
+    }
+
+    // Curl工具
+    async function runCurl() {
+        const url = document.getElementById('curl-url').value.trim();
+        if (!url) { toast('请输入URL', 'error'); return; }
+        const el = document.getElementById('curl-output');
+        el.textContent = `> curl ${url}\n请求中...\n`;
+        try {
+            const d = await api('/api/tools/curl', 'POST', { url });
+            el.textContent = `> ${d.command}\nHTTP Code: ${d.httpCode || 'N/A'}\n\n${d.output}`;
+        } catch (e) { el.textContent = `> curl ${url}\n错误: ${e.message}`; }
+    }
+    </script>
+    {% block scripts %}{% endblock %}
+    <footer style="position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(10,10,10,0.95);border-top:1px solid #1e1e1e;padding:4px 16px;display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:11px;color:#555;">SSH-Baseline-Checker_v0.1</span>
+        <a href="https://github.com/kinghtxg/SSH-Baseline-Checker" target="_blank" style="font-size:11px;color:#555;text-decoration:none;transition:color 0.15s;" onmouseenter="this.style.color='#60a5fa'" onmouseleave="this.style.color='#555'"><i class="fab fa-github"></i> github.com/kinghtxg/SSH-Baseline-Checker</a>
+    </footer>
+</body>
+</html>

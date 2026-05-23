@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block title %}单账号检查 - SSH 巡检工具{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-5xl mx-auto fade">
+    <div class="mb-6">
+        <h1 class="text-xl font-semibold text-white">单账号检查</h1>
+        <p class="text-sm text-gray-400 mt-1">输入SSH凭据，即时执行检查（不保存账号）</p>
+    </div>
+
+    <!-- 连接配置 -->
+    <div class="tc p-5 mb-5">
+        <h2 class="text-sm font-medium text-white mb-4 flex items-center gap-2"><i class="fas fa-user-check blue"></i> SSH连接</h2>
+
+        <!-- 主机信息 -->
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block text-xs text-gray-400 mb-1.5">主机/IP <span class="text-red-400">*</span></label>
+                <input type="text" id="host" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="192.168.1.1">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1.5">端口</label>
+                <input type="number" id="port" class="ti w-full px-3 py-2 rounded-lg text-sm" value="22">
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="block text-xs text-gray-400 mb-1.5">用户名 <span class="text-red-400">*</span></label>
+                <input type="text" id="username" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="root">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1.5">密码 <span class="text-red-400">*</span></label>
+                <input type="password" id="password" class="ti w-full px-3 py-2 rounded-lg text-sm">
+            </div>
+        </div>
+
+        <!-- Sudo配置 -->
+        <div class="mb-4 p-3 bg-[#0f0f0f] rounded-lg border border-[#1e1e1e]">
+            <div class="flex items-center gap-2 mb-2">
+                <input type="checkbox" id="can-sudo" class="rounded bg-[#0f0f0f] border-[#1e1e1e]">
+                <label for="can-sudo" class="text-xs text-gray-400">可切换root（su）</label>
+            </div>
+            <div id="sudo-password-section" class="hidden mt-2">
+                <label class="block text-xs text-gray-400 mb-1.5">root密码（如不同）</label>
+                <input type="password" id="root-password" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="留空则与普通密码相同">
+            </div>
+        </div>
+
+        <!-- 检查分组 -->
+        <div class="mb-4">
+            <label class="block text-xs text-gray-400 mb-1.5">检查分组（可选）</label>
+            <div class="flex flex-wrap gap-2 mt-2" id="group-checkboxes">
+                {% for g in groups %}
+                <label class="flex items-center gap-1.5 text-xs text-gray-400 bg-[#0f0f0f] px-3 py-1.5 rounded border border-[#1e1e1e] hover:border-[#333] cursor-pointer">
+                    <input type="checkbox" name="group" value="{{ g.id }}" class="rounded bg-[#0f0f0f] border-[#1e1e1e]">
+                    {{ g.name }}
+                </label>
+                {% endfor %}
+            </div>
+            <div class="flex gap-2 mt-2">
+                <button onclick="selectAllGroups()" class="text-xs text-blue-400 hover:underline">全选</button>
+                <button onclick="deselectAllGroups()" class="text-xs text-gray-500 hover:underline">清空</button>
+            </div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="flex gap-2">
+            <button onclick="testSingleConn()" class="btn-s px-4 py-2 rounded-lg text-sm flex items-center gap-2"><i class="fas fa-plug"></i> 测试连接</button>
+            <button onclick="startSingleInspect()" id="btn-start-single" class="btn-p px-5 py-2 rounded-lg text-sm flex items-center gap-2"><i class="fas fa-play"></i> 开始检查</button>
+        </div>
+
+        <div id="conn-status" class="hidden mt-3 p-3 rounded-lg bg-[#0f0f0f] text-sm"></div>
+    </div>
+
+    <!-- 进度 -->
+    <div id="progress-section" class="hidden tc p-5 mb-5">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-medium text-white"><i class="fas fa-spinner fa-spin ok" id="spin-icon"></i> <span id="progress-title">执行中...</span></h2>
+            <span id="progress-text" class="text-xs text-gray-400">0 / 0</span>
+        </div>
+        <div class="w-full bg-[#0f0f0f] rounded-full h-2 mb-2"><div id="progress-bar" class="bg-blue-500 h-2 rounded-full transition-all" style="width:0%"></div></div>
+        <div class="flex gap-4 text-xs">
+            <span class="ok"><i class="fas fa-check-circle"></i> 成功 <b id="succ-count">0</b></span>
+            <span class="fail"><i class="fas fa-xmark-circle"></i> 失败 <b id="fail-count">0</b></span>
+            <span class="text-gray-400"><i class="fas fa-clock"></i> 耗时 <b id="elapsed">0</b>s</span>
+        </div>
+    </div>
+
+    <!-- 结果 -->
+    <div id="results-section" class="hidden">
+        <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-medium text-white">执行结果</h2>
+            <div class="flex gap-2">
+                <button onclick="document.querySelectorAll('.cmd-detail').forEach(e=>e.classList.remove('hidden'))" class="btn-s px-3 py-1 rounded text-xs">展开</button>
+                <button onclick="document.querySelectorAll('.cmd-detail').forEach(e=>e.classList.add('hidden'))" class="btn-s px-3 py-1 rounded text-xs">折叠</button>
+            </div>
+        </div>
+        <div id="results-list" class="space-y-3"></div>
+    </div>
+
+    <!-- 摘要 -->
+    <div id="summary-section" class="hidden tc p-5 mt-4">
+        <h2 class="text-sm font-medium text-white mb-3"><i class="fas fa-clipboard-check ok"></i> 检查完成</h2>
+        <div class="grid grid-cols-4 gap-4 text-center">
+            <div class="bg-[#0f0f0f] rounded-lg p-3"><div class="text-2xl font-bold text-white" id="sum-total">0</div><div class="text-xs text-gray-400">命令</div></div>
+            <div class="bg-[#0f0f0f] rounded-lg p-3"><div class="text-2xl font-bold ok" id="sum-success">0</div><div class="text-xs text-gray-400">成功</div></div>
+            <div class="bg-[#0f0f0f] rounded-lg p-3"><div class="text-2xl font-bold fail" id="sum-fail">0</div><div class="text-xs text-gray-400">失败</div></div>
+            <div class="bg-[#0f0f0f] rounded-lg p-3"><div class="text-2xl font-bold blue" id="sum-duration">0s</div><div class="text-xs text-gray-400">耗时</div></div>
+        </div>
+        <div class="mt-4 flex gap-2 justify-center">
+            <a href="/reports" class="btn-p px-5 py-2 rounded-lg text-sm inline-flex items-center gap-2"><i class="fas fa-file-lines"></i> 查看报告</a>
+        </div>
+    </div>
+</div>
+
+<script>
+// Sudo切换
+document.getElementById('can-sudo').addEventListener('change', function() {
+    document.getElementById('sudo-password-section').classList.toggle('hidden', !this.checked);
+});
+
+function selectAllGroups() {
+    document.querySelectorAll('#group-checkboxes input[type="checkbox"]').forEach(cb => cb.checked = true);
+}
+function deselectAllGroups() {
+    document.querySelectorAll('#group-checkboxes input[type="checkbox"]').forEach(cb => cb.checked = false);
+}
+
+function getSingleConn() {
+    const groupIds = [];
+    document.querySelectorAll('#group-checkboxes input[type="checkbox"]:checked').forEach(cb => {
+        groupIds.push(parseInt(cb.value));
+    });
+    return {
+        host: document.getElementById('host').value.trim(),
+        port: parseInt(document.getElementById('port').value) || 22,
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value.trim(),
+        canSudo: document.getElementById('can-sudo').checked,
+        rootPassword: document.getElementById('root-password').value || null,
+        groupIds: groupIds.length > 0 ? groupIds : null,
+    };
+}
+
+async function testSingleConn() {
+    const c = getSingleConn();
+    if (!c.host || !c.username || !c.password) { toast('请填写完整信息', 'error'); return; }
+    const st = document.getElementById('conn-status');
+    st.className = 'mt-3 p-3 rounded-lg bg-[#0f0f0f] text-sm';
+    st.innerHTML = '<i class="fas fa-circle-notch fa-spin text-yellow-400"></i> 测试中...';
+    st.classList.remove('hidden');
+    try {
+        const d = await api('/api/inspect/single/test', 'POST', c);
+        st.innerHTML = d.success ?
+            `<i class="fas fa-check-circle ok"></i> <span class="ok">${d.message}</span>` :
+            `<i class="fas fa-xmark-circle fail"></i> <span class="fail">${d.message}</span>`;
+    } catch (e) {
+        st.innerHTML = '<i class="fas fa-xmark-circle fail"></i> <span class="fail">连接失败</span>';
+        toast(e.message, 'error');
+    }
+}
+
+let sessionId, items, totalCmds, doneCmds, successC, failC, startT, timerI, rootState = {};
+
+async function startSingleInspect() {
+    const c = getSingleConn();
+    if (!c.host || !c.username || !c.password) { toast('请填写完整信息', 'error'); return; }
+    document.getElementById('btn-start-single').disabled = true;
+    document.getElementById('btn-start-single').innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> 启动中...';
+
+    try {
+        const d = await api('/api/inspect/single', 'POST', c);
+        sessionId = d.session.id;
+        items = d.items;
+        totalCmds = d.session.totalCommands;
+        doneCmds = successC = failC = 0;
+        startT = Date.now();
+        rootState = { isActive: false };
+
+        document.getElementById('progress-section').classList.remove('hidden');
+        document.getElementById('results-section').classList.remove('hidden');
+        document.getElementById('summary-section').classList.add('hidden');
+        document.getElementById('conn-status').classList.add('hidden');
+        document.getElementById('results-list').innerHTML = '';
+        updateProg();
+        timerI = setInterval(() => { document.getElementById('elapsed').textContent = ((Date.now()-startT)/1000).toFixed(1); }, 100);
+
+        let globalIdx = 1;
+        for (const item of items) {
+            createItemCard(item);
+            for (const cmd of item.commands) {
+                await execOne(item, cmd, globalIdx, totalCmds, c);
+                globalIdx++;
+            }
+        }
+
+        clearInterval(timerI);
+        const dur = (Date.now()-startT)/1000;
+        await api('/api/inspection/finish', 'POST', {sessionId, successCount: successC, failCount: failC, duration: dur});
+        document.getElementById('spin-icon').className = 'fas fa-check-circle ok';
+        document.getElementById('progress-title').textContent = '执行完成';
+        document.getElementById('btn-start-single').disabled = false;
+        document.getElementById('btn-start-single').innerHTML = '<i class="fas fa-play"></i> 开始检查';
+        document.getElementById('summary-section').classList.remove('hidden');
+        document.getElementById('sum-total').textContent = totalCmds;
+        document.getElementById('sum-success').textContent = successC;
+        document.getElementById('sum-fail').textContent = failC;
+        document.getElementById('sum-duration').textContent = dur.toFixed(1)+'s';
+        toast(`检查完成！${successC}成功 ${failC}失败`);
+    } catch (e) {
+        clearInterval(timerI);
+        document.getElementById('btn-start-single').disabled = false;
+        document.getElementById('btn-start-single').innerHTML = '<i class="fas fa-play"></i> 开始检查';
+        toast(e.message, 'error');
+    }
+}
+
+function createItemCard(item) {
+    const div = document.createElement('div');
+    div.className = 'tc p-4';
+    div.id = `item-card-${item.id}`;
+    div.innerHTML = `
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <i class="fas fa-folder text-yellow-600 text-xs"></i>
+                <span class="text-sm font-medium text-white">${escHtml(item.name)}</span>
+                <span class="text-xs text-gray-600">${item.commands.length} 条命令</span>
+            </div>
+            <span class="item-status text-xs"><i class="fas fa-circle-notch fa-spin text-yellow-400"></i> 执行中</span>
+        </div>
+        <div class="mt-2 space-y-1.5" id="cmds-${item.id}">
+            ${item.commands.map((c,i) => `
+                <div class="cmd-row border-l-2 border-[#222] pl-3 py-1" id="cmd-row-${item.id}-${c.id}">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs text-gray-600 w-5">#${i+1}</span>
+                            <code class="text-xs bg-[#0f0f0f] px-2 py-0.5 rounded text-gray-400 font-mono">${escHtml(c.command)}</code>
+                            ${c.description ? `<span class="text-xs text-gray-600">${escHtml(c.description)}</span>` : ''}
+                            ${c.requireRoot ? `<span class="text-xs text-red-400 bg-red-900/20 px-1 py-0.5 rounded">root</span>` : ''}
+                        </div>
+                        <span class="cmd-status text-xs"><i class="fas fa-circle-notch fa-spin text-yellow-400"></i></span>
+                    </div>
+                    <pre class="cmd-detail hidden bg-[#080808] p-2 rounded text-xs text-gray-400 overflow-x-auto max-h-40 mt-1 font-mono" id="out-${item.id}-${c.id}"></pre>
+                    <div class="cmd-detail hidden flex items-center gap-3 mt-1 text-xs" id="meta-${item.id}-${c.id}"></div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    document.getElementById('results-list').appendChild(div);
+}
+
+async function execOne(item, cmd, idx, total, conn) {
+    const cid = cmd.id;
+    try {
+        const d = await api('/api/inspection/execute', 'POST', {
+            sessionId, item, command: cmd, index: idx, total,
+            host: conn.host, port: conn.port, username: conn.username, password: conn.password,
+            canSudo: conn.canSudo, rootPassword: conn.rootPassword || conn.password,
+            interactive: true,
+            rootState: rootState,
+        });
+        const ok = d.exitCode === 0;
+        if (ok) successC++; else failC++;
+        doneCmds++;
+        if (d.rootActive) rootState.isActive = true;
+
+        const row = document.getElementById(`cmd-row-${item.id}-${cid}`);
+        if (row) row.style.borderLeftColor = ok ? '#4ade80' : '#f87171';
+        const st = document.querySelector(`#cmd-row-${item.id}-${cid} .cmd-status`);
+        if (st) st.innerHTML = ok ? '<i class="fas fa-check-circle ok"></i>' : '<i class="fas fa-xmark-circle fail"></i>';
+
+        const out = document.getElementById(`out-${item.id}-${cid}`);
+        if (out) { out.textContent = d.output || '(无输出)'; out.classList.remove('hidden'); }
+
+        let meta = `<span class="${ok?'ok':'fail'}"><i class="fas fa-${ok?'check':'xmark'}"></i> EXIT ${d.exitCode}</span>`;
+        meta += ` <span class="text-gray-600"><i class="fas fa-clock"></i> ${d.duration.toFixed(2)}s</span>`;
+        if (d.regexMatched !== null) meta += ` <span class="${d.regexMatched?'ok':'warn'}">${d.regexMatched?'通过':'未通过'}</span>`;
+        if (d.screenshotPath) meta += ` <a href="${d.screenshotPath}" target="_blank" class="blue hover:underline"><i class="fas fa-image"></i></a>`;
+        const mel = document.getElementById(`meta-${item.id}-${cid}`);
+        if (mel) { mel.innerHTML = meta; mel.classList.remove('hidden'); }
+
+        updateProg(); updateItemStatus(item.id);
+    } catch (e) {
+        failC++; doneCmds++;
+        const row = document.getElementById(`cmd-row-${item.id}-${cid}`);
+        if (row) row.style.borderLeftColor = '#f87171';
+        const st = document.querySelector(`#cmd-row-${item.id}-${cid} .cmd-status`);
+        if (st) st.innerHTML = '<i class="fas fa-xmark-circle fail"></i>';
+        const out = document.getElementById(`out-${item.id}-${cid}`);
+        if (out) { out.textContent = '错误: '+e.message; out.classList.remove('hidden'); }
+        updateProg(); updateItemStatus(item.id);
+    }
+}
+
+function updateItemStatus(itemId) {
+    const card = document.getElementById(`item-card-${itemId}`);
+    if (!card) return;
+    const rows = card.querySelectorAll('.cmd-row');
+    let allDone = true, hasFail = false;
+    rows.forEach(r => {
+        if (r.style.borderLeftColor !== 'rgb(74, 222, 128)' && r.style.borderLeftColor !== 'rgb(248, 113, 113)') allDone = false;
+        if (r.style.borderLeftColor === 'rgb(248, 113, 113)') hasFail = true;
+    });
+    if (allDone) {
+        const st = card.querySelector('.item-status');
+        if (hasFail) st.innerHTML = '<i class="fas fa-exclamation-circle warn"></i> <span class="warn">部分失败</span>';
+        else st.innerHTML = '<i class="fas fa-check-circle ok"></i> <span class="ok">全部通过</span>';
+    }
+}
+
+function updateProg() {
+    const pct = totalCmds > 0 ? (doneCmds/totalCmds*100) : 0;
+    document.getElementById('progress-bar').style.width = pct+'%';
+    document.getElementById('progress-text').textContent = `${doneCmds} / ${totalCmds}`;
+    document.getElementById('succ-count').textContent = successC;
+    document.getElementById('fail-count').textContent = failC;
+}
+</script>
+{% endblock %}

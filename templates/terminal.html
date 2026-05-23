@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}SSH 终端{% endblock %}
+{% block content %}
+<div class="container-fluid p-3">
+    <h4 class="mb-3">SSH 交互式终端</h4>
+    <div class="row mb-3">
+        <div class="col-md-3">
+            <select id="hostSelect" class="form-select">
+                <option value="">-- 手动输入 --</option>
+                {% for ag in account_groups %}
+                <optgroup label="{{ ag.name }}">
+                    {% for h in ag.hosts %}
+                    <option value="{{ h.id }}" data-host="{{ h.host }}" data-port="{{ h.port }}"
+                            data-username="{{ h.username }}">{{ h.name or h.host }}</option>
+                    {% endfor %}
+                </optgroup>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2"><input id="termHost" class="form-control" placeholder="主机"></div>
+        <div class="col-md-1"><input id="termPort" class="form-control" placeholder="端口" value="22"></div>
+        <div class="col-md-2"><input id="termUser" class="form-control" placeholder="用户名"></div>
+        <div class="col-md-2"><input id="termPass" class="form-control" type="password" placeholder="密码"></div>
+        <div class="col-md-2"><button id="termConnectBtn" class="btn btn-primary w-100">连接</button></div>
+    </div>
+    <div id="terminal" class="bg-dark text-light p-3 rounded" style="height:500px;overflow-y:auto;font-family:monospace;font-size:14px;white-space:pre-wrap;"></div>
+</div>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+const socket = io();
+const term = document.getElementById('terminal');
+
+document.getElementById('hostSelect').addEventListener('change', function() {
+    const opt = this.selectedOptions[0];
+    if (opt.value) {
+        document.getElementById('termHost').value = opt.dataset.host;
+        document.getElementById('termPort').value = opt.dataset.port;
+        document.getElementById('termUser').value = opt.dataset.username;
+    }
+});
+
+document.getElementById('termConnectBtn').addEventListener('click', function() {
+    term.textContent = '正在连接...\n';
+    socket.emit('ssh_connect', {
+        host: document.getElementById('termHost').value,
+        port: parseInt(document.getElementById('termPort').value) || 22,
+        username: document.getElementById('termUser').value,
+        password: document.getElementById('termPass').value
+    });
+});
+
+let cmdBuf = '';
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'c') {
+        socket.emit('ssh_send', {command: '\x03'});
+        return;
+    }
+    if (e.key === 'Enter') {
+        socket.emit('ssh_send', {command: cmdBuf});
+        cmdBuf = '';
+        return;
+    }
+    if (e.key === 'Backspace') {
+        cmdBuf = cmdBuf.slice(0, -1);
+        return;
+    }
+    if (e.key.length === 1) {
+        cmdBuf += e.key;
+    }
+});
+
+socket.on('ssh_data', function(data) {
+    term.textContent += data.output;
+    term.scrollTop = term.scrollHeight;
+});
+socket.on('ssh_error', function(data) {
+    term.textContent += '\n[错误] ' + data.message + '\n';
+});
+</script>
+{% endblock %}

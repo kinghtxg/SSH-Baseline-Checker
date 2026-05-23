@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}账号管理 - SSH 巡检工具{% endblock %}
+
+{% block content %}
+<div class="p-6 max-w-5xl mx-auto fade">
+    <div class="flex items-center justify-between mb-6">
+        <div><h1 class="text-xl font-semibold text-white">账号管理</h1><p class="text-sm text-gray-400 mt-1">管理目标主机账号组，支持批量巡检</p></div>
+        <button onclick="openGroupModal()" class="btn-p px-3 py-2 rounded-lg text-sm flex items-center gap-2"><i class="fas fa-plus"></i> 新建账号组</button>
+    </div>
+
+    <div id="groups-container" class="space-y-4">
+        {% for ag in account_groups %}
+        <div class="tc">
+            <div class="flex items-center justify-between p-3 border-b border-[#1e1e1e]">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-server blue"></i>
+                    <span class="font-medium text-white text-sm">{{ ag.name }}</span>
+                    <span class="text-xs text-gray-600">{{ ag.hosts|length }} 台主机</span>
+                    {% if ag.description %}<span class="text-xs text-gray-600">| {{ ag.description }}</span>{% endif %}
+                </div>
+                <div class="flex gap-1">
+                    <button onclick="openHostModal({{ ag.id }})" class="btn-s px-2 py-1 rounded text-xs flex items-center gap-1"><i class="fas fa-plus"></i> 添加主机</button>
+                    <button onclick="editGroup({{ ag.id }}, '{{ ag.name }}', '{{ ag.description or '' }}')" class="p-1.5 rounded hover:bg-[#1e1e1e] text-gray-500 hover:text-white" title="编辑"><i class="fas fa-pen text-xs"></i></button>
+                    <button onclick="if(confirm('确认删除？')) deleteGroup({{ ag.id }})" class="p-1.5 rounded hover:bg-[#1e1e1e] text-gray-500 hover:text-red-400" title="删除"><i class="fas fa-trash text-xs"></i></button>
+                </div>
+            </div>
+            <div class="p-3">
+                {% if ag.hosts %}
+                <table class="w-full text-sm">
+                    <thead><tr class="text-xs text-gray-600 border-b border-[#1e1e1e]">
+                        <th class="text-left py-2">别名</th>
+                        <th class="text-left py-2">主机</th>
+                        <th class="text-left py-2">用户名</th>
+                        <th class="text-center py-2 w-16">su root</th>
+                        <th class="text-right py-2 w-28">操作</th>
+                    </tr></thead>
+                    <tbody>
+                        {% for h in ag.hosts %}
+                        <tr class="border-b border-[#141414] hover:bg-[#1a1a1a]">
+                            <td class="py-2 text-white">{{ h.name or '—' }}</td>
+                            <td class="py-2"><code class="text-xs bg-[#0f0f0f] px-2 py-0.5 rounded text-gray-400">{{ h.host }}:{{ h.port }}</code></td>
+                            <td class="py-2 text-gray-400">{{ h.username }}</td>
+                            <td class="py-2 text-center">{% if h.can_sudo %}<span class="ok text-xs"><i class="fas fa-check"></i></span>{% else %}<span class="text-gray-600 text-xs">—</span>{% endif %}</td>
+                            <td class="py-2 text-right">
+                                <div class="flex justify-end gap-1">
+                                    <button onclick="testHost({{ h.id }})" class="p-1.5 rounded hover:bg-[#1e1e1e] text-gray-500 hover:text-green-400" title="测试连接"><i class="fas fa-plug text-xs"></i></button>
+                                    <button onclick="editHost({{ h.id }})" class="p-1.5 rounded hover:bg-[#1e1e1e] text-gray-500 hover:text-white" title="编辑"><i class="fas fa-pen text-xs"></i></button>
+                                    <button onclick="if(confirm('确认删除？')) deleteHost({{ h.id }})" class="p-1.5 rounded hover:bg-[#1e1e1e] text-gray-500 hover:text-red-400" title="删除"><i class="fas fa-trash text-xs"></i></button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center py-6 text-gray-600 text-sm"><i class="fas fa-server mb-2 text-lg block"></i><p>暂无主机</p><button onclick="openHostModal({{ ag.id }})" class="blue hover:underline text-xs mt-1">添加主机</button></div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- 账号组弹窗 -->
+<div id="group-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);">
+    <div class="tc w-full max-w-md mx-4" style="background:#141414;border:1px solid #1e1e1e;">
+        <div class="flex items-center justify-between p-4 border-b border-[#1e1e1e]"><h3 class="text-sm font-medium text-white" id="group-title">新建账号组</h3><button onclick="closeModal('group-modal')" class="text-gray-500 hover:text-white"><i class="fas fa-xmark"></i></button></div>
+        <div class="p-4 space-y-4"><input type="hidden" id="group-id">
+            <div><label class="block text-xs text-gray-400 mb-1.5">名称 <span class="text-red-400">*</span></label><input type="text" id="group-name" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="如：生产环境"></div>
+            <div><label class="block text-xs text-gray-400 mb-1.5">描述</label><input type="text" id="group-desc" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="可选"></div>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-[#1e1e1e]"><button onclick="closeModal('group-modal')" class="btn-s px-4 py-2 rounded-lg text-sm">取消</button><button onclick="saveGroup()" class="btn-p px-4 py-2 rounded-lg text-sm">保存</button></div>
+    </div>
+</div>
+
+<!-- 主机弹窗 -->
+<div id="host-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);">
+    <div class="tc w-full max-w-md mx-4" style="background:#141414;border:1px solid #1e1e1e;">
+        <div class="flex items-center justify-between p-4 border-b border-[#1e1e1e]"><h3 class="text-sm font-medium text-white" id="host-title">添加主机</h3><button onclick="closeModal('host-modal')" class="text-gray-500 hover:text-white"><i class="fas fa-xmark"></i></button></div>
+        <div class="p-4 space-y-4"><input type="hidden" id="host-id"><input type="hidden" id="host-group-id">
+            <div><label class="block text-xs text-gray-400 mb-1.5">别名</label><input type="text" id="host-name" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="如：Web服务器01"></div>
+            <div class="grid grid-cols-3 gap-2">
+                <div class="col-span-2"><label class="block text-xs text-gray-400 mb-1.5">主机/IP <span class="text-red-400">*</span></label><input type="text" id="host-host" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="192.168.1.1"></div>
+                <div><label class="block text-xs text-gray-400 mb-1.5">端口</label><input type="number" id="host-port" class="ti w-full px-3 py-2 rounded-lg text-sm" value="22"></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div><label class="block text-xs text-gray-400 mb-1.5">用户名 <span class="text-red-400">*</span></label><input type="text" id="host-username" class="ti w-full px-3 py-2 rounded-lg text-sm"></div>
+                <div><label class="block text-xs text-gray-400 mb-1.5">密码 <span class="text-red-400">*</span></label><input type="password" id="host-password" class="ti w-full px-3 py-2 rounded-lg text-sm"></div>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-2"><input type="checkbox" id="host-sudo" class="rounded bg-[#0f0f0f] border-[#1e1e1e]"><label for="host-sudo" class="text-xs text-gray-400">可切换root（su）</label></div>
+            </div>
+            <div><label class="block text-xs text-gray-400 mb-1.5">root密码（如不同）</label><input type="password" id="host-root-pass" class="ti w-full px-3 py-2 rounded-lg text-sm" placeholder="留空则与普通密码相同"></div>
+        </div>
+        <div class="flex justify-end gap-2 p-4 border-t border-[#1e1e1e]"><button onclick="closeModal('host-modal')" class="btn-s px-4 py-2 rounded-lg text-sm">取消</button><button onclick="saveHost()" class="btn-p px-4 py-2 rounded-lg text-sm">保存</button></div>
+    </div>
+</div>
+
+<script>
+let allHosts = {};
+{% for ag in account_groups %}{% for h in ag.hosts %}allHosts[{{ h.id }}] = {id:{{ h.id }},groupId:{{ ag.id }},name:'{{ h.name or '' }}',host:'{{ h.host }}',port:{{ h.port }},username:'{{ h.username }}',password:'{{ h.password }}',canSudo:{{ 'true' if h.can_sudo else 'false' }},rootPassword:'{{ h.root_password or '' }}'};{% endfor %}{% endfor %}
+
+// 账号组
+function openGroupModal() { document.getElementById('group-id').value=''; document.getElementById('group-name').value=''; document.getElementById('group-desc').value=''; document.getElementById('group-title').textContent='新建账号组'; openModal('group-modal'); }
+function editGroup(id,name,desc) { document.getElementById('group-id').value=id; document.getElementById('group-name').value=name; document.getElementById('group-desc').value=desc; document.getElementById('group-title').textContent='编辑账号组'; openModal('group-modal'); }
+async function saveGroup() { const id=document.getElementById('group-id').value, name=document.getElementById('group-name').value.trim(); if(!name){toast('请输入名称','error');return;} try { if(id) await api(`/api/account-groups/${id}`,'PUT',{name,description:document.getElementById('group-desc').value.trim()}); else await api('/api/account-groups','POST',{name,description:document.getElementById('group-desc').value.trim()}); toast('已保存'); closeModal('group-modal'); location.reload(); } catch(e){toast(e.message,'error');} }
+async function deleteGroup(id) { try{await api(`/api/account-groups/${id}`,'DELETE'); toast('已删除'); location.reload();}catch(e){toast(e.message,'error');} }
+
+// 主机
+function openHostModal(gid,hid) { document.getElementById('host-id').value=hid||''; document.getElementById('host-group-id').value=gid; document.getElementById('host-title').textContent=hid?'编辑主机':'添加主机';
+    if(hid&&allHosts[hid]) { const h=allHosts[hid]; document.getElementById('host-name').value=h.name||''; document.getElementById('host-host').value=h.host; document.getElementById('host-port').value=h.port; document.getElementById('host-username').value=h.username; document.getElementById('host-password').value=h.password; document.getElementById('host-sudo').checked=h.canSudo; document.getElementById('host-root-pass').value=h.rootPassword||''; }
+    else { ['host-name','host-host','host-username','host-password','host-root-pass'].forEach(id=>document.getElementById(id).value=''); document.getElementById('host-port').value=22; document.getElementById('host-sudo').checked=false; }
+    openModal('host-modal');
+}
+function editHost(id) { openHostModal(allHosts[id].groupId,id); }
+async function saveHost() { const body={groupId:parseInt(document.getElementById('host-group-id').value), name:document.getElementById('host-name').value.trim()||null, host:document.getElementById('host-host').value.trim(), port:parseInt(document.getElementById('host-port').value)||22, username:document.getElementById('host-username').value.trim(), password:document.getElementById('host-password').value, canSudo:document.getElementById('host-sudo').checked, rootPassword:document.getElementById('host-root-pass').value||null}; if(!body.host||!body.username||!body.password){toast('请填写完整信息','error');return;} try { const id=document.getElementById('host-id').value; if(id) await api(`/api/target-hosts/${id}`,'PUT',body); else await api('/api/target-hosts','POST',body); toast('已保存'); closeModal('host-modal'); location.reload(); } catch(e){toast(e.message,'error');} }
+async function deleteHost(id) { try{await api(`/api/target-hosts/${id}`,'DELETE'); toast('已删除'); location.reload();}catch(e){toast(e.message,'error');} }
+async function testHost(id) { toast('测试中...'); try{const d=await api(`/api/target-hosts/${id}/test`,'POST'); toast(d.message, d.success?'success':'error');}catch(e){toast(e.message,'error');} }
+</script>
+{% endblock %}
